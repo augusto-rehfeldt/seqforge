@@ -173,6 +173,8 @@ class SeqforgeGateTest(unittest.TestCase):
         self.assertIn("is at https://github.com/u/r/tree/main/x", text)
         self.assertIn('"Conjecture: a(n) = 1." is true', text)
         self.assertIn("Howroyd, A069361 formula", text)
+        # the draft comes with the form a signed-in person pastes it into, once: not for the known result
+        self.assertEqual(text.count("https://oeis.org/edit?seq=A069429"), 1)
 
     def test_novelty_keeps_queries_clean_and_judges_proofs_with_oeis_context(self):
         ai = StubAI(['{"verdict": "KNOWN", "matching_hits": []}',

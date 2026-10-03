@@ -313,7 +313,11 @@ def report(e: dict, results: list, rejected: list) -> str:
             quoted = _SIGNATURE.sub("", r["line"])[:300]
             out += ["Draft OEIS comment (submit by hand, after reading the proof and the Lean statement):", "",
                     f"    The conjecture \"{quoted}\" is true; a proof, checked in Lean 4 + Mathlib, "
-                    f"is at {url or '<link to the published result>'}.", ""]
+                    f"is at {url or '<link to the published result>'}.", "",
+                    # OEIS forbids automated submissions and comments written in full by a model
+                    # (https://oeis.org/wiki/Use_of_AI_for_OEIS_Submissions_is_Forbidden): a link, never a POST
+                    f"Signed in to the OEIS, add it under Comments at https://oeis.org/edit?seq={a} in your own "
+                    "words: the OEIS rejects automated submissions and comments written in full by a model.", ""]
         elif r["status"] == "machine-refuted":
             out += ["Counterexample, checked in Lean 4:", "", "```", mf._witness(r)[:1500], "```", ""]
         elif r["status"] == "known":

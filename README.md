@@ -55,5 +55,9 @@ bundle. `--publish-existing` publishes what is already on disk and exits.
 
 Each published folder also shows the conjecture line as the OEIS lists it, with the
 agreement script and its output. Nothing is sent to the OEIS automatically. The
-local `seq_output/<A-number>/report.md` holds a drafted comment. A person submits it through an OEIS account, after
-reading the proof and checking the Lean statement against the conjecture.
+local `seq_output/<A-number>/report.md` holds a drafted comment and the link to the
+sequence's edit form. A person submits it through an OEIS account, after reading the
+proof and checking the Lean statement against the conjecture. This stays manual: the
+OEIS [forbids](https://oeis.org/wiki/Use_of_AI_for_OEIS_Submissions_is_Forbidden)
+automated submissions and comments written in full by a model, and blocks accounts
+that repeat them.

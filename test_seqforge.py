@@ -185,7 +185,7 @@ class SeqforgeAgreementTest(unittest.TestCase):
 
 class SeqforgePublishTest(unittest.TestCase):
     def test_results_go_to_their_own_repository_with_an_oeis_front_page(self):
-        self.assertEqual(sf.mf.RESULTS_REPO, "seqforge-results")
+        self.assertEqual(sf.mf.RESULTS_REPO, sf.os.getenv("SEQFORGE_RESULTS_REPO", "seqforge-results"))
         self.assertTrue(str(sf.mf.RESULTS_CHECKOUT).endswith("seqforge-results"))
         tmp = Path(tempfile.mkdtemp())
         (tmp / "A069429-c1").mkdir()
@@ -195,6 +195,17 @@ class SeqforgePublishTest(unittest.TestCase):
         page = sf.mf.results_index(tmp, "u/seqforge-results")
         self.assertIn("# seqforge results", page)
         self.assertIn("[A069429](https://oeis.org/A069429)", page)
+
+    def test_a_published_result_shows_the_oeis_line_and_the_agreement_script(self):
+        r = {"id": "c1", "oeis": "A069429", "line": "Empirical G.f.: x*(3-2*x)/(1-6*x+4*x^2). - _Colin Barker_, Feb 22 2012",
+             "statement": "s", "status": "machine-verified",
+             "agree": {"code": "print('TERMS AGREE: formulas=12 definition=8')", "output": "TERMS AGREE: formulas=12 definition=8"}}
+        with mock.patch.object(sf, "_mathforge_publication", return_value="# Proved: s\n\nbody\n"):
+            text = sf.mf._publication("seed", r, None)
+        self.assertIn("https://oeis.org/A069429", text)
+        self.assertIn("Empirical G.f.: x*(3-2*x)/(1-6*x+4*x^2). - _Colin Barker_", text)
+        self.assertIn("TERMS AGREE: formulas=12 definition=8')", text)
+        self.assertTrue(text.startswith("# Proved: s"))
 
 
 if __name__ == "__main__":

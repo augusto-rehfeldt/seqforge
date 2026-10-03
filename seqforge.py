@@ -69,6 +69,26 @@ def results_index(checkout: Path, repo: str) -> str:
 
 
 mf.results_index = results_index
+_mathforge_publication = mf._publication
+
+
+def publication(seed: str, r: dict, models=None) -> str:
+    """mathforge's write-up plus what it cannot know: the conjecture as OEIS lists it, and the
+    script that checked the restatement against the listed terms, so a reader can re-run it."""
+    body = _mathforge_publication(seed, r, models)
+    title, _, rest = body.partition("\n")
+    a = r.get("oeis", "")
+    agree = r.get("agree") or {}
+    extra = ["", "## The conjecture as listed in the OEIS", "", f"[{a}](https://oeis.org/{a}):", "",
+             f"> {r.get('line', '')}", "",
+             "The statement below is a restatement of that line. Before any other check, this script compared "
+             "both formulas, and a brute force of the restated definition, with the terms the OEIS lists:", "",
+             "```python", agree.get("code", "(not recorded)").strip(), "```", "",
+             f"Output: `{mf._verdict_line(agree.get('output', ''), 200)}`", ""]
+    return title + "\n" + "\n".join(extra) + rest
+
+
+mf._publication = publication
 OEIS_SEARCH = "https://oeis.org/search?"
 # Colin Barker's fitted generating functions on R. H. Hardin's array counts lead the
 # first query: transfer-matrix objects, the most provable kind of OEIS conjecture

@@ -48,6 +48,7 @@ GitHub repository `<you>/seqforge-results` (`SEQFORGE_RESULTS_REPO`, checkout
 one folder per result with the write-up, the scripts, the Lean file and a Palomar
 bundle. `--publish-existing` publishes what is already on disk and exits.
 
-Nothing is sent to the OEIS automatically. Each published result's `report.md`
-holds a drafted comment. A person submits it through an OEIS account, after
+Each published folder also shows the conjecture line as the OEIS lists it, with the
+agreement script and its output. Nothing is sent to the OEIS automatically. The
+local `seq_output/<A-number>/report.md` holds a drafted comment. A person submits it through an OEIS account, after
 reading the proof and checking the Lean statement against the conjecture.

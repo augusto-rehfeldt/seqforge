@@ -18,6 +18,7 @@ publishing for machine-checked results.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -42,8 +43,15 @@ QUERIES = ('formula:"Empirical G.f."', 'formula:"Conjecture: a(n)"', 'formula:"E
 MAX_PER_ENTRY = 4  # conjecture lines pursued per sequence
 _OPEN = re.compile(r"(?i)\bconjectur|\bempiric")
 # a settled line is not a target; the triage judge also sees the whole entry for the rest
-_SETTLED = re.compile(r"(?i)\bprov(?:ed|en|es)\b|\bproof\b|\bcounterexample\b|\bfalse\b|\bfails\b")
-_ASYMPTOTIC = re.compile(r"~|->|\blim\b|\bapprox")
+_SETTLED = re.compile(r"(?i)\bprov(?:ed|en|es)\b|\bproof\b|\bcounterexample\b|\bfalse\b|\bfails\b|\btrue\b|\bcorrect\b")
+_ASYMPTOTIC = re.compile(r"(?i)~|->|\blim\b|\bapprox|asymptotic")
+_GF = re.compile(r"(?i)\bg\.f\.")  # Barker writes "Empirical g.f.", Hardin "Empirical G.f."
+# an entry whose own text settles its conjectures has no target, whichever line it means
+_ENTRY_SETTLED = re.compile(r"(?i)conjectures\s+(?:above\s+)?are\s+(?:true|correct)"
+                            r"|(?:conjecture\s+above|above\s+conjectures?)\s+(?:is|are)\s+(?:true|correct)"
+                            r"|formulas?\s+(?:above\s+)?(?:is|are)\s+correct"
+                            r"|conjectur\w*\s+(?:above\s+)?(?:was|were|has been|have been)\s+proved")
+_SIGNATURE = re.compile(r"\s+-\s+_[^_]+_.*$")  # "... - _Colin Barker_, Feb 22 2012"
 
 
 def anum(entry: dict) -> str:
@@ -65,9 +73,25 @@ def entry(a: str) -> dict:
 
 def conjecture_lines(e: dict) -> list:
     """Open, exact claims: a conjecture or empirical formula, not asymptotic, not settled."""
-    return [line for field in ("formula", "comment") for line in e.get(field) or []
-            if _OPEN.search(line) and (("a(" in line and "=" in line) or "G.f." in line)
+    lines = [line for field in ("formula", "comment") for line in e.get(field) or []]
+    if _ENTRY_SETTLED.search("\n".join(lines)):
+        return []
+    return [line for line in lines
+            if _OPEN.search(line) and (("a(" in line and "=" in line) or _GF.search(line))
             and not _SETTLED.search(line) and not _ASYMPTOTIC.search(line)]
+
+
+def _key(line: str) -> str:
+    """Stage ids from the line's text: OEIS entries change between runs, positions shift."""
+    return hashlib.sha1(line.encode("utf-8")).hexdigest()[:6]
+
+
+def terms_agree(check: dict) -> bool | None:
+    """True / False from the agreement script's verdict, None when it gave none."""
+    out = check.get("output", "")
+    if check.get("exit_code") != 0 or "TERMS DIFFER" in out:
+        return False if "TERMS DIFFER" in out else None
+    return True if "TERMS AGREE" in out else None
 
 
 def targets(queries, done: set, limit: int) -> list:
@@ -97,7 +121,7 @@ class SeqForge(mf.Forge):
         text = "\n".join(e.get("formula") or []) + "\n" + "\n".join(e.get("comment") or [])
         return self.ask_json(
             f"OEIS {anum(e)}: {e.get('name', '')}\n"
-            f"FIRST TERMS: {str(e.get('data', ''))[:300]}\n"
+            f"OFFSET: {e.get('offset', '')}\nFIRST TERMS: {str(e.get('data', ''))[:300]}\n"
             f"FORMULA AND COMMENT LINES OF THE ENTRY:\n{text[:6000]}\n\n"
             f"TARGET LINE: {line}\n\n"
             "Decide whether the TARGET LINE is an open conjecture worth proving, and if so state it "
@@ -108,10 +132,16 @@ class SeqForge(mf.Forge):
             "- a(n) can be computed from the sequence's DEFINITION (the name above, not the listed "
             "terms) by a brute-force program for enough n to test it in minutes;\n"
             "- no other line of the entry says it was proved or refuted;\n"
-            "- it is not an immediate rewriting of the definition.\n\n"
+            "- it is not an immediate rewriting of the definition;\n"
+            "- it is not a famous open problem or a case of one (prime gaps, irreducibility patterns "
+            "of primes, Goldbach-type statements): those will not be settled here.\n\n"
             "The statement must be self-contained: define a(n) from the OEIS name in full, with its "
             "offset, so someone who never saw OEIS can test and prove it. For a generating function, "
             "state the equivalent linear recurrence with its initial terms as well.\n\n"
+            "The search space must test well past what the claim's own size determines: at least "
+            "twice the recurrence order plus ten, or the polynomial degree plus ten, and n <= 30 or "
+            "more wherever brute force allows. A degree-8 polynomial checked at four points proves "
+            "nothing.\n\n"
             'Return ONLY JSON: {"usable": true|false, "reason": "...", "title": "...", "headline": '
             '"the claim in at most 20 plain words", "statement": "...", "notation": "every symbol '
             'defined", "search_space": "the n range a brute-force check can cover, with bounds", '
@@ -121,13 +151,63 @@ class SeqForge(mf.Forge):
             model_type="review",
         )
 
+    def agree(self, e: dict, c: dict) -> dict:
+        """Executable gate between the OEIS line and its restatement: triage is one model's
+        rewrite (offset, initial terms, G.f. to recurrence), and every later stage checks
+        the rewrite, not the line. On the work model, the other one."""
+        return self.write_and_run(
+            "Check that a restated theorem says the same thing as an OEIS formula, on the listed terms.\n\n"
+            f"OEIS {anum(e)}: {e.get('name', '')}\nOFFSET: {e.get('offset', '')}\n"
+            f"LISTED TERMS a(offset), a(offset+1), ...: {e.get('data', '')}\n\n"
+            f"OEIS LINE: {c['line']}\n\nRESTATED THEOREM: {c['statement']}\nNOTATION: {c.get('notation', '')}\n\n"
+            "Write ONE self-contained Python 3 script (stdlib; fractions for exact arithmetic) that:\n"
+            "- computes terms from the OEIS LINE exactly as written (expand a generating function as an "
+            "exact power series; iterate a recurrence from the listed initial terms; evaluate a closed "
+            "form), and compares them with the listed terms at the right offset;\n"
+            "- computes terms from the RESTATED THEOREM's formula the same way and compares them too;\n"
+            "- does not use the sequence's definition: this checks the two formulas against the listed "
+            "data, not against each other's assumptions;\n"
+            "- prints `TERMS AGREE:` with the number of terms compared when both match every listed term "
+            "the formulas cover, else `TERMS DIFFER:` with the first index and the three values.\n"
+            "Exit code 0 either way; no bare `assert`. Return only the script in one ```python fence.",
+            f"{c['id']}_agree",
+            markers=("TERMS AGREE", "TERMS DIFFER"),
+        )
+
     def novelty(self, c: dict) -> dict:
-        """mathforge's retrieval + judge, asking the question that fits a listed conjecture."""
-        return super().novelty({**c, "statement": (
-            f"{c['statement']}\n\n(OEIS {c.get('oeis', '')} lists this as an unproved conjecture. The "
-            "question is whether a published PROOF exists. Being listed as a conjecture does not make "
-            "it known, and an easy proof is still worth writing down: count it KNOWN only if a proof is "
-            "published or follows from a cited result.)")})
+        """mathforge's retrieval and judge on the plain statement, then a second judge that asks
+        the question a listed conjecture raises, with the OEIS context mathforge does not see."""
+        base = super().novelty(c)
+        cross = []
+        if self.search:
+            try:  # proofs are often written into the entries that cite this one
+                for x in search(c.get("oeis", ""))[:8]:
+                    if anum(x) != c.get("oeis"):
+                        mentions = [ln for ln in (x.get("formula") or []) + (x.get("comment") or [])
+                                    if c.get("oeis", "?") in ln]
+                        cross.append(f"{anum(x)}: {x.get('name', '')}\n  " + "\n  ".join(mentions[:4]))
+            except Exception as exc:
+                cross.append(f"(OEIS cross-reference search failed: {type(exc).__name__})")
+        retrieved = "\n".join(f"- {h.get('title', '')} {h.get('url', '')}" for h in base.get("retrieved") or [])
+        mine = self.ask_json(
+            f"OEIS {c.get('oeis', '')} lists this as an unproved conjecture:\n{c.get('line', '')}\n\n"
+            f"RESTATED: {c['statement']}\n\n"
+            f"REFERENCES AND LINKS OF THE ENTRY:\n{c.get('oeis_refs', '') or '(none)'}\n\n"
+            f"OTHER OEIS ENTRIES THAT CITE IT:\n{chr(10).join(cross) or '(none retrieved)'}\n\n"
+            f"A GENERIC NOVELTY JUDGE SAID: {base.get('verdict')} -- {base.get('reasoning', '')}\n"
+            f"CLOSEST KNOWN: {base.get('closest_known_results')}\nLITERATURE RETRIEVED:\n{retrieved or '(none)'}\n\n"
+            "The question is whether a published PROOF exists. Being listed as a conjecture does not "
+            "make it known, and an easy proof is still worth writing down for OEIS. Say KNOWN only if "
+            "a proof is published, or follows directly from a result cited above (name it); "
+            "APPARENTLY_NEW if not; UNCLEAR if a source above may contain it.\n\n"
+            'Return ONLY JSON: {"verdict": "KNOWN"|"UNCLEAR"|"APPARENTLY_NEW", "reasoning": "...", '
+            '"matching_hits": ["the source that proves it, if any"]}',
+            "verdict",
+            model_type="review",
+        )
+        return {**base, "generic_verdict": base.get("verdict"), "verdict": mine.get("verdict"),
+                "reasoning": mine.get("reasoning", ""), "oeis_cross_references": cross,
+                "matching_hits": list(base.get("matching_hits") or []) + list(mine.get("matching_hits") or [])}
 
 
 def done_ids() -> set:
@@ -136,7 +216,13 @@ def done_ids() -> set:
 
 def _index() -> list:
     path = OUTPUT_ROOT / "index.json"
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:  # kept for a person to look at, never silently reset
+        path.rename(path.with_name(f"index.damaged-{int(time.time())}.json"))
+        return []
 
 
 def _save_index(summary: dict) -> None:
@@ -147,23 +233,50 @@ def _save_index(summary: dict) -> None:
     os.replace(tmp, OUTPUT_ROOT / "index.json")
 
 
+def _url(published) -> str | None:
+    return published.get("url") if isinstance(published, dict) else published
+
+
 def report(e: dict, results: list, rejected: list) -> str:
     a = anum(e)
     out = [f"# {a}: {e.get('name', '')}", "", f"https://oeis.org/{a}", ""]
     for r in results:
         out += [f"## {r['id']}: `{r['status']}`", "", f"> {r['line']}", "", r.get("statement", ""), ""]
-        if r.get("published"):
-            out += [f"Published: {r['published']}", ""]
+        url = _url(r.get("published"))
+        if url:
+            out += [f"Published: {url}", ""]
         if r["status"] == "machine-verified":
-            where = r.get("published") or "<link to the published result>"
+            quoted = _SIGNATURE.sub("", r["line"])[:300]
             out += ["Draft OEIS comment (submit by hand, after reading the proof and the Lean statement):", "",
-                    f"    The conjecture \"{r['line'][:200]}\" is true; a proof, checked in Lean 4 + Mathlib, "
-                    f"is at {where}.", ""]
+                    f"    The conjecture \"{quoted}\" is true; a proof, checked in Lean 4 + Mathlib, "
+                    f"is at {url or '<link to the published result>'}.", ""]
         elif r["status"] == "machine-refuted":
             out += ["Counterexample, checked in Lean 4:", "", "```", mf._witness(r)[:1500], "```", ""]
+        elif r["status"] == "known":
+            nov = r.get("novelty") or {}
+            out += [f"Known: {nov.get('reasoning', '')}", ""] + [f"- {h}" for h in nov.get("matching_hits") or []] + [""]
+        elif r["status"] == "mistranslated":
+            out += [f"The restatement does not match the listed terms: {mf._verdict_line(r['agree']['output'], 300)}", ""]
+        elif r.get("error"):
+            out += [f"Error: {r['error']}", ""]
     for line, why in rejected:
         out += [f"- not pursued: {line[:160]} -- {why}"]
     return "\n".join(out) + "\n"
+
+
+def _pursue(forge, run, c: dict) -> dict:
+    """The agreement gate, then mathforge's pipeline."""
+    try:
+        check = run.stage(f"{c['id']}.agree", lambda: forge.agree(c["entry"], c))
+    except Exception as exc:
+        return {**c, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    c = {k: v for k, v in c.items() if k != "entry"}
+    verdict = terms_agree(check)
+    if verdict is False:
+        return {**c, "status": "mistranslated", "agree": check}
+    if verdict is None:
+        return {**c, "status": "inconclusive", "agree": check}
+    return {**mf.run_one(forge, c), "agree": check}
 
 
 def research(forge_for, e: dict, workers: int = 1, publish: bool = False) -> dict:
@@ -176,21 +289,24 @@ def research(forge_for, e: dict, workers: int = 1, publish: bool = False) -> dic
     mf.rule(f"{a} {e.get('name', '')[:60]}")
     lines = conjecture_lines(e)[:MAX_PER_ENTRY]
 
-    def triage(k_line):
-        k, line = k_line
-        return run.stage(f"triage{k}", lambda: forge.triage(e, line))
+    def triage(line):
+        try:
+            return run.stage(f"triage-{_key(line)}", lambda: forge.triage(e, line))
+        except Exception as exc:  # not cached: a rerun asks again
+            return {"usable": False, "reason": f"triage error: {type(exc).__name__}: {exc}"}
 
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(lines) or 1))) as pool:
-        verdicts = list(pool.map(triage, enumerate(lines, 1)))
+        verdicts = list(pool.map(triage, lines))
+    refs = mf._clean("\n".join((e.get("reference") or []) + (e.get("link") or [])), 3000)
     conjectures, rejected = [], []
-    for k, (line, t) in enumerate(zip(lines, verdicts), 1):
+    for line, t in zip(lines, verdicts):
         if t.get("usable") and t.get("statement"):
-            conjectures.append({**t, "id": f"c{k}", "oeis": a, "line": line})
+            conjectures.append({**t, "id": f"c{_key(line)}", "oeis": a, "line": line, "oeis_refs": refs, "entry": e})
         else:
             rejected.append((line, t.get("reason", "")))
 
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(conjectures) or 1))) as pool:
-        results = list(pool.map(lambda c: mf.run_one(forge, c), conjectures))
+        results = list(pool.map(lambda c: _pursue(forge, run, c), conjectures))
     run.data["results"] = results
     run.save()
     if publish:
@@ -225,6 +341,9 @@ def setup_ai(args, state_file: Path):
     mf.set_reasoning_effort(ai, effort, review)
     mf.log(f"models      {os.environ['AI_WRITING_MODEL']} (work) / {os.environ['AI_REVIEW_MODEL']} (review), "
            f"effort {effort} / {review}")
+    if os.environ["AI_WRITING_MODEL"] == os.environ["AI_REVIEW_MODEL"]:
+        mf.log("WARNING     work and review are the same model: every independent re-check shares its "
+               "blind spots. Pass --review-model with a different model.")
     return ai
 
 

@@ -42,6 +42,12 @@ resumable by rerunning the A-number), the generated scripts and `report.md`.
 
 ## Publishing
 
-Nothing is sent to the OEIS. A `machine-verified` result gets a drafted comment in
-its `report.md`, for a person to read and submit. `--publish` turns on mathforge's
-opt-in GitHub publishing for machine-checked results.
+`--publish` pushes each `machine-verified` and `machine-refuted` result to the public
+GitHub repository `<you>/seqforge-results` (`SEQFORGE_RESULTS_REPO`, checkout
+`~/seqforge-results` or `SEQFORGE_RESULTS_DIR`). It uses mathforge's publishing code:
+one folder per result with the write-up, the scripts, the Lean file and a Palomar
+bundle. `--publish-existing` publishes what is already on disk and exits.
+
+Nothing is sent to the OEIS automatically. Each published result's `report.md`
+holds a drafted comment. A person submits it through an OEIS account, after
+reading the proof and checking the Lean statement against the conjecture.

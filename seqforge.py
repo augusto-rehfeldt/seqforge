@@ -36,6 +36,39 @@ sys.path.insert(0, str(MATHFORGE))
 import mathforge as mf  # noqa: E402
 
 OUTPUT_ROOT = Path(os.getenv("SEQFORGE_OUTPUT") or HERE / "seq_output")
+# --publish uses mathforge's publishing (Lean-checked results only, Palomar bundles), into
+# a repository of its own: OEIS results are not mathforge papers
+mf.RESULTS_REPO = os.getenv("SEQFORGE_RESULTS_REPO", "seqforge-results")
+mf.RESULTS_CHECKOUT = Path(os.getenv("SEQFORGE_RESULTS_DIR") or Path.home() / "seqforge-results")
+SEQFORGE_URL = "https://github.com/augusto-rehfeldt/seqforge"
+
+
+def results_index(checkout: Path, repo: str) -> str:
+    """The results repository's front page, in place of mathforge's."""
+    rows = sorted((json.loads(p.read_text(encoding="utf-8")) for p in checkout.glob("*/result.json")),
+                  key=lambda m: (m.get("date", ""), m.get("folder", "")), reverse=True)
+    lines = [
+        "# seqforge results", "",
+        "Conjectured formulas from the [OEIS](https://oeis.org/) settled by [seqforge](" + SEQFORGE_URL + "), "
+        "an automated pipeline built on [mathforge](" + mf.MATHFORGE_URL + "): "
+        "language models restate the conjecture, check the restatement against the listed terms, "
+        "search for counterexamples, prove, and formalize in Lean 4 + Mathlib. Only results Lean "
+        "checked sorry-free are here. No person reviewed them; corrections are welcome as issues. "
+        "Nothing here has been submitted to the OEIS.", "",
+        f"{len(rows)} result(s).", "",
+        "| Date | Sequence | Verdict | Claim | Models |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for m in rows:
+        a = m["folder"].split("-", 1)[0]
+        claim = m.get("headline", "").split(": ", 1)[-1].replace("|", "\\|")
+        lines.append(f"| {m.get('date', '')} | [{a}](https://oeis.org/{a}) | "
+                     f"{'refuted' if m.get('status') in mf.REFUTED else 'proved'} | [{claim}]({m['folder']}/) | "
+                     f"{m.get('models', '')} |")
+    return "\n".join(lines) + "\n"
+
+
+mf.results_index = results_index
 OEIS_SEARCH = "https://oeis.org/search?"
 # Colin Barker's fitted generating functions on R. H. Hardin's array counts lead the
 # first query: transfer-matrix objects, the most provable kind of OEIS conjecture
@@ -380,10 +413,12 @@ def main(argv=None) -> int:
     ap.add_argument("--no-lean", action="store_true", help="no Lean: nothing becomes machine-checked")
     ap.add_argument("--no-search", action="store_true", help="skip the literature search")
     ap.add_argument("--publish", action="store_true", help="mathforge's PUBLIC GitHub publishing of machine-checked results")
+    ap.add_argument("--publish-existing", action="store_true",
+                    help="publish the machine-checked results already on disk and exit")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
-    if not (args.anums or args.auto or args.forever):
-        ap.error("give A-numbers, --auto N or --forever")
+    if not (args.anums or args.auto or args.forever or args.publish_existing):
+        ap.error("give A-numbers, --auto N, --forever or --publish-existing")
     mf.VERBOSE = mf.VERBOSE or args.verbose
     sys.stdout.reconfigure(line_buffering=True)
     mf.exit_on_ctrl_c(message="stopped; finished stages are cached, rerun to resume")
@@ -398,6 +433,13 @@ def main(argv=None) -> int:
     ai = setup_ai(args, OUTPUT_ROOT / "provider_state.json")
     forge_for = lambda run: SeqForge(ai, run, lean, search=not args.no_search)  # noqa: E731
 
+    if args.publish_existing:
+        count = 0
+        for state in sorted(OUTPUT_ROOT.glob("A*/state.json")):
+            run = mf.Run(state.parent)
+            count += len(mf.publish(forge_for(run), run.data.get("seed", run.path.name), run.data.get("results") or []))
+        mf.log(f"publish: {count} result(s) published")
+        return 0
     for a in args.anums:
         research(forge_for, entry(a.upper()), args.workers, args.publish)
     while args.auto or args.forever:

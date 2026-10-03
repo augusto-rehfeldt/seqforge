@@ -183,5 +183,19 @@ class SeqforgeAgreementTest(unittest.TestCase):
         self.assertIn("GAPS", text)
 
 
+class SeqforgePublishTest(unittest.TestCase):
+    def test_results_go_to_their_own_repository_with_an_oeis_front_page(self):
+        self.assertEqual(sf.mf.RESULTS_REPO, "seqforge-results")
+        self.assertTrue(str(sf.mf.RESULTS_CHECKOUT).endswith("seqforge-results"))
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "A069429-c1").mkdir()
+        (tmp / "A069429-c1" / "result.json").write_text(json.dumps(
+            {"folder": "A069429-c1", "status": "machine-verified", "headline": "Proved: a(n) = 6a(n-1) - 4a(n-2)",
+             "date": "2026-10-02", "models": "m"}), encoding="utf-8")
+        page = sf.mf.results_index(tmp, "u/seqforge-results")
+        self.assertIn("# seqforge results", page)
+        self.assertIn("[A069429](https://oeis.org/A069429)", page)
+
+
 if __name__ == "__main__":
     unittest.main()

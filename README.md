@@ -29,12 +29,17 @@ things:
 python seqforge.py A069429                   # one sequence
 python seqforge.py --auto 10 --workers 3     # the next ten unseen sequences
 python seqforge.py --forever --workers 3
+python seqforge.py A069429 --effort low --review-effort high
 python -B -m unittest -q test_seqforge       # offline checks
 ```
 
 Provider and models come from the shared ai-suite menu. Picks are remembered in
 `seq_output/provider_state.json`. Lean uses mathforge's `~/mathforge-lean`;
-`--no-lean` skips it.
+`--no-lean` skips it. `--provider`, `--model` and `--review-model` override the
+shared menu. `--effort` and `--review-effort` override its per-role reasoning picks;
+`provider-default` sends no effort override. Without flags, menu/environment picks
+and mathforge's unattended defaults are unchanged. Rerun an A-number to resume its
+cached stages; SeqForge has no `--resume` flag.
 
 Output goes to `seq_output/<A-number>/`, which holds `state.json` (every stage,
 resumable by rerunning the A-number), the generated scripts and `report.md`.

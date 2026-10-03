@@ -37,6 +37,37 @@ class SeqforgeTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_effort_flags_reach_setup_and_invalid_choices_are_rejected(self):
+        with mock.patch.object(sf, "setup_ai") as setup, mock.patch.object(sf.sys, "stdout"), \
+                mock.patch.object(sf.mf, "exit_on_ctrl_c"), mock.patch.object(sf, "entry", return_value=ENTRY), \
+                mock.patch.object(sf, "research"):
+            self.assertEqual(sf.main(["A069429", "--no-lean", "--effort", "low", "--review-effort", "high"]), 0)
+        self.assertEqual((setup.call_args.args[0].effort, setup.call_args.args[0].review_effort), ("low", "high"))
+        for flag in ("--effort", "--review-effort"):
+            with self.subTest(flag=flag), mock.patch.object(sf, "setup_ai") as setup, \
+                    mock.patch.object(sf.sys, "stderr"):
+                with self.assertRaises(SystemExit) as stopped:
+                    sf.main(["A069429", flag, "invalid"])
+                self.assertEqual(stopped.exception.code, 2)
+                setup.assert_not_called()
+
+    def test_setup_ai_forwards_explicit_efforts_and_legacy_namespaces(self):
+        from argparse import Namespace
+        for extra, expected in (({}, (None, None)),
+                                ({"effort": "low", "review_effort": "high"}, ("low", "high")),
+                                ({"effort": "provider-default", "review_effort": "provider-default"},
+                                 ("provider-default", "provider-default"))):
+            args = Namespace(provider="p", model="work", review_model="review", **extra)
+            with self.subTest(extra=extra), mock.patch.object(sf.mf, "load_local_env"), \
+                    mock.patch.object(sf.mf, "choose_ai", return_value=("p", "config", ["w", "r"])), \
+                    mock.patch.object(sf.mf, "AIService"), mock.patch.object(sf.mf, "log"), \
+                    mock.patch.object(sf.mf, "resolve_efforts", return_value=("low", "high")) as resolve, \
+                    mock.patch.object(sf.mf, "set_reasoning_effort") as apply, \
+                    mock.patch.object(sf.sys.stdin, "isatty", return_value=False), mock.patch.dict(sf.os.environ):
+                ai = sf.setup_ai(args, self.tmp / "provider_state.json")
+            resolve.assert_called_once_with(*expected, False)
+            apply.assert_called_once_with(ai, "low", "high")
+
     def test_conjecture_lines_keep_open_exact_claims_only(self):
         lines = sf.conjecture_lines(ENTRY)
         self.assertEqual(lines, [ENTRY["formula"][0], ENTRY["comment"][0]])

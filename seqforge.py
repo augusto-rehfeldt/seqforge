@@ -411,7 +411,7 @@ def setup_ai(args, state_file: Path):
     os.environ["AI_REVIEW_MODEL"] = args.review_model or picked[-1]
     os.environ["AI_WRITING_COMPLETION_TOKENS"] = os.environ["AI_REVIEW_COMPLETION_TOKENS"] = str(mf.DEFAULT_MAX_TOKENS)
     ai = mf.AIService(config_path=config)
-    effort, review = mf.resolve_efforts(None, None, interactive)
+    effort, review = mf.resolve_efforts(getattr(args, "effort", None), getattr(args, "review_effort", None), interactive)
     mf.set_reasoning_effort(ai, effort, review)
     mf.log(f"models      {os.environ['AI_WRITING_MODEL']} (work) / {os.environ['AI_REVIEW_MODEL']} (review), "
            f"effort {effort} / {review}")
@@ -430,6 +430,8 @@ def main(argv=None) -> int:
     ap.add_argument("--provider")
     ap.add_argument("--model")
     ap.add_argument("--review-model")
+    ap.add_argument("--effort", choices=mf.EFFORTS, help="work-model reasoning effort; overrides the menu pick")
+    ap.add_argument("--review-effort", choices=mf.EFFORTS, help="review-model reasoning effort; overrides the menu pick")
     ap.add_argument("--no-lean", action="store_true", help="no Lean: nothing becomes machine-checked")
     ap.add_argument("--no-search", action="store_true", help="skip the literature search")
     ap.add_argument("--publish", action="store_true", help="mathforge's PUBLIC GitHub publishing of machine-checked results")

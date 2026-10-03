@@ -161,6 +161,7 @@ class SeqforgeAgreementTest(unittest.TestCase):
     def test_agreement_needs_enough_terms_from_the_formulas_and_the_definition(self):
         ok = lambda out: sf.terms_agree({"exit_code": 0, "output": out})
         self.assertTrue(ok("TERMS AGREE: formulas=12 definition=6"))
+        self.assertTrue(ok("TERMS AGREE: formulas = 12, definition = 6"))  # punctuation is no reason to skip
         self.assertIsNone(ok("TERMS AGREE: formulas=0 definition=0"))  # compared nothing
         self.assertIsNone(ok("TERMS AGREE: formulas=12 definition=2"))  # the definition barely ran
         self.assertIsNone(ok("TERMS AGREE"))

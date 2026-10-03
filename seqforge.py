@@ -43,7 +43,7 @@ QUERIES = ('formula:"Empirical G.f."', 'formula:"Conjecture: a(n)"', 'formula:"E
 MAX_PER_ENTRY = 4  # conjecture lines pursued per sequence
 MIN_FORMULA_TERMS = 8  # listed terms both formulas must reproduce
 MIN_DEFINITION_TERMS = 5  # listed terms a brute force of the restated definition must reproduce
-_AGREE = re.compile(r"TERMS AGREE:\s*formulas=(\d+)\s+definition=(\d+)")
+_AGREE = re.compile(r"TERMS AGREE:\s*formulas\s*=\s*(\d+)[,;\s]+definition\s*=\s*(\d+)")
 _OPEN = re.compile(r"(?i)\bconjectur|\bempiric")
 # a settled line is not a target; the triage judge also sees the whole entry for the rest
 _SETTLED = re.compile(r"(?i)\bprov(?:ed|en|es)\b|\bproof\b|\bcounterexample\b|\bfalse\b|\bfails\b|\btrue\b|\bcorrect\b")
@@ -176,8 +176,7 @@ class SeqForge(mf.Forge):
             "- separately, brute-forces a(n) from the RESTATED definition (in the NOTATION, not from "
             "any formula: enumerate the objects and count) for as many small n as fit in two minutes, "
             f"at least {MIN_DEFINITION_TERMS}, and compares those with the listed terms too;\n"
-            f"- compares at least {MIN_FORMULA_TERMS} listed terms for the formulas, or all if fewer are "
-            "listed;\n"
+            f"- compares at least {MIN_FORMULA_TERMS} listed terms for the formulas;\n"
             "- prints exactly `TERMS AGREE: formulas=<k> definition=<m>` (k, m = listed terms each check "
             "matched) when everything matches, else `TERMS DIFFER:` with which check, the first index "
             "and the values.\n"

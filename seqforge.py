@@ -41,6 +41,9 @@ OEIS_SEARCH = "https://oeis.org/search?"
 # first query: transfer-matrix objects, the most provable kind of OEIS conjecture
 QUERIES = ('formula:"Empirical G.f."', 'formula:"Conjecture: a(n)"', 'formula:"Empirical: a(n)"')
 MAX_PER_ENTRY = 4  # conjecture lines pursued per sequence
+MIN_FORMULA_TERMS = 8  # listed terms both formulas must reproduce
+MIN_DEFINITION_TERMS = 5  # listed terms a brute force of the restated definition must reproduce
+_AGREE = re.compile(r"TERMS AGREE:\s*formulas=(\d+)\s+definition=(\d+)")
 _OPEN = re.compile(r"(?i)\bconjectur|\bempiric")
 # a settled line is not a target; the triage judge also sees the whole entry for the rest
 _SETTLED = re.compile(r"(?i)\bprov(?:ed|en|es)\b|\bproof\b|\bcounterexample\b|\bfalse\b|\bfails\b|\btrue\b|\bcorrect\b")
@@ -76,22 +79,27 @@ def conjecture_lines(e: dict) -> list:
     lines = [line for field in ("formula", "comment") for line in e.get(field) or []]
     if _ENTRY_SETTLED.search("\n".join(lines)):
         return []
-    return [line for line in lines
+    return [line for line in dict.fromkeys(lines)
             if _OPEN.search(line) and (("a(" in line and "=" in line) or _GF.search(line))
             and not _SETTLED.search(line) and not _ASYMPTOTIC.search(line)]
 
 
 def _key(line: str) -> str:
     """Stage ids from the line's text: OEIS entries change between runs, positions shift."""
-    return hashlib.sha1(line.encode("utf-8")).hexdigest()[:6]
+    # decimal digits: mathforge tags log lines by `c<digits>`
+    return f"{int(hashlib.sha1(line.encode('utf-8')).hexdigest(), 16) % 10**7:07d}"
 
 
 def terms_agree(check: dict) -> bool | None:
-    """True / False from the agreement script's verdict, None when it gave none."""
+    """True / False from the agreement script's verdict, None when it gave none or compared
+    too few terms to mean anything."""
     out = check.get("output", "")
-    if check.get("exit_code") != 0 or "TERMS DIFFER" in out:
-        return False if "TERMS DIFFER" in out else None
-    return True if "TERMS AGREE" in out else None
+    if "TERMS DIFFER" in out:
+        return False
+    got = _AGREE.search(out) if check.get("exit_code") == 0 else None
+    if not got:
+        return None
+    return True if int(got[1]) >= MIN_FORMULA_TERMS and int(got[2]) >= MIN_DEFINITION_TERMS else None
 
 
 def targets(queries, done: set, limit: int) -> list:
@@ -165,10 +173,14 @@ class SeqForge(mf.Forge):
             "exact power series; iterate a recurrence from the listed initial terms; evaluate a closed "
             "form), and compares them with the listed terms at the right offset;\n"
             "- computes terms from the RESTATED THEOREM's formula the same way and compares them too;\n"
-            "- does not use the sequence's definition: this checks the two formulas against the listed "
-            "data, not against each other's assumptions;\n"
-            "- prints `TERMS AGREE:` with the number of terms compared when both match every listed term "
-            "the formulas cover, else `TERMS DIFFER:` with the first index and the three values.\n"
+            "- separately, brute-forces a(n) from the RESTATED definition (in the NOTATION, not from "
+            "any formula: enumerate the objects and count) for as many small n as fit in two minutes, "
+            f"at least {MIN_DEFINITION_TERMS}, and compares those with the listed terms too;\n"
+            f"- compares at least {MIN_FORMULA_TERMS} listed terms for the formulas, or all if fewer are "
+            "listed;\n"
+            "- prints exactly `TERMS AGREE: formulas=<k> definition=<m>` (k, m = listed terms each check "
+            "matched) when everything matches, else `TERMS DIFFER:` with which check, the first index "
+            "and the values.\n"
             "Exit code 0 either way; no bare `assert`. Return only the script in one ```python fence.",
             f"{c['id']}_agree",
             markers=("TERMS AGREE", "TERMS DIFFER"),
@@ -257,6 +269,15 @@ def report(e: dict, results: list, rejected: list) -> str:
             out += [f"Known: {nov.get('reasoning', '')}", ""] + [f"- {h}" for h in nov.get("matching_hits") or []] + [""]
         elif r["status"] == "mistranslated":
             out += [f"The restatement does not match the listed terms: {mf._verdict_line(r['agree']['output'], 300)}", ""]
+        elif r["status"] == "inconclusive" and "falsification" not in r:
+            out += [f"Agreement check gave no usable verdict: {mf._verdict_line(r['agree']['output'], 300)}", ""]
+        elif r["status"] in ("inconclusive", "refuted"):
+            out += [f"Search: {mf._verdict_line(r['falsification']['output'], 300)}", ""]
+        elif r["status"] in ("provisional", "verified"):
+            lean = r.get("lean") or {}
+            state = "sorry-free" if lean.get("sorry_free") else "compiles, not sorry-free" if lean.get("compiles") else "not checked"
+            out += [f"Referee: {(r.get('referee') or {}).get('verdict')}; independent check: "
+                    f"{mf._verdict_line((r.get('independent_check') or {}).get('output', ''), 120)}; Lean: {state}", ""]
         elif r.get("error"):
             out += [f"Error: {r['error']}", ""]
     for line, why in rejected:
@@ -266,11 +287,12 @@ def report(e: dict, results: list, rejected: list) -> str:
 
 def _pursue(forge, run, c: dict) -> dict:
     """The agreement gate, then mathforge's pipeline."""
+    e = c["entry"]
+    c = {k: v for k, v in c.items() if k != "entry"}
     try:
-        check = run.stage(f"{c['id']}.agree", lambda: forge.agree(c["entry"], c))
+        check = run.stage(f"{c['id']}.agree", lambda: forge.agree(e, c))
     except Exception as exc:
         return {**c, "status": "error", "error": f"{type(exc).__name__}: {exc}"}
-    c = {k: v for k, v in c.items() if k != "entry"}
     verdict = terms_agree(check)
     if verdict is False:
         return {**c, "status": "mistranslated", "agree": check}

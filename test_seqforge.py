@@ -78,7 +78,7 @@ class SeqforgeTest(unittest.TestCase):
                    "notation": "a(n) as in the name", "search_space": "n <= 40"}
         forge = mock.Mock()
         forge.triage.side_effect = [triaged, {"usable": False, "reason": "vague"}]
-        forge.agree.return_value = {"exit_code": 0, "output": "TERMS AGREE: 5 terms", "code": ""}
+        forge.agree.return_value = {"exit_code": 0, "output": "TERMS AGREE: formulas=12 definition=8", "code": ""}
         verified = {"status": "machine-verified", "lean": {"code": "theorem main_theorem : True := trivial"}}
         with mock.patch.object(sf.mf, "run_one", side_effect=lambda f, c: {**c, **verified}) as run_one:
             summary = sf.research(lambda run: forge, ENTRY, workers=2)
@@ -95,9 +95,6 @@ class SeqforgeTest(unittest.TestCase):
             sf.research(lambda run: forge, ENTRY, workers=1)
         self.assertEqual(len(json.loads((self.tmp / "index.json").read_text(encoding="utf-8"))), 1)
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class SeqforgeGateTest(unittest.TestCase):
@@ -120,7 +117,7 @@ class SeqforgeGateTest(unittest.TestCase):
     def test_stages_are_keyed_by_line_content_not_position(self):
         forge = mock.Mock()
         forge.triage.side_effect = lambda e, line: {**self.usable, "statement": line}
-        forge.agree.return_value = {"exit_code": 0, "output": "TERMS AGREE", "code": ""}
+        forge.agree.return_value = {"exit_code": 0, "output": "TERMS AGREE: formulas=12 definition=8", "code": ""}
         with mock.patch.object(sf.mf, "run_one", side_effect=lambda f, c: {**c, "status": "verified"}):
             sf.research(lambda run: forge, ENTRY)
             moved = {**ENTRY, "formula": ["Conjecture: a(n) = 3*a(n-1) for n > 7."] + ENTRY["formula"]}
@@ -158,3 +155,32 @@ class SeqforgeGateTest(unittest.TestCase):
         self.assertIn("Andrew Howroyd", ai.prompts[1])
         self.assertEqual(got["verdict"], "APPARENTLY_NEW")
         self.assertEqual(got["generic_verdict"], "KNOWN")
+
+
+class SeqforgeAgreementTest(unittest.TestCase):
+    def test_agreement_needs_enough_terms_from_the_formulas_and_the_definition(self):
+        ok = lambda out: sf.terms_agree({"exit_code": 0, "output": out})
+        self.assertTrue(ok("TERMS AGREE: formulas=12 definition=6"))
+        self.assertIsNone(ok("TERMS AGREE: formulas=0 definition=0"))  # compared nothing
+        self.assertIsNone(ok("TERMS AGREE: formulas=12 definition=2"))  # the definition barely ran
+        self.assertIsNone(ok("TERMS AGREE"))
+        self.assertFalse(ok("TERMS DIFFER: definition n=3 gives 21, listed 22"))
+        self.assertIsNone(sf.terms_agree({"exit_code": 1, "output": "Traceback"}))
+
+    def test_ids_are_decimal_and_lines_unique(self):
+        self.assertRegex(sf._key("Conjecture: a(n) = n."), r"^[0-9]{7}$")  # mathforge tags need c<digits>
+        twice = {"number": 3, "name": "x", "formula": ["Conjecture: a(n) = n."], "comment": ["Conjecture: a(n) = n."]}
+        self.assertEqual(sf.conjecture_lines(twice), ["Conjecture: a(n) = n."])
+
+    def test_every_status_is_explained_in_the_report(self):
+        rs = [{"id": "c1", "line": "l", "statement": "s", "status": "inconclusive",
+               "agree": {"output": "TERMS AGREE: formulas=1 definition=0"}},
+              {"id": "c2", "line": "l", "statement": "s", "status": "provisional", "referee": {"verdict": "GAPS"},
+               "independent_check": {"output": "ALL CHECKS PASSED"}, "lean": {"compiles": True, "sorry_free": False}}]
+        text = sf.report(ENTRY, rs, [])
+        self.assertIn("formulas=1", text)
+        self.assertIn("GAPS", text)
+
+
+if __name__ == "__main__":
+    unittest.main()
